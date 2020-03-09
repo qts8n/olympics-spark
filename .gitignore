@@ -1,0 +1,11 @@
+.idea
+target
+out
+*.iml
+.vscode
+*.swp
+*.swo
+*.sw
+*.vim
+tags
+*.csv
