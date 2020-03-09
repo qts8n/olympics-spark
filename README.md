@@ -74,7 +74,7 @@ gcloud beta emulators pubsub start --project=olympics-269511
 
 ### Запуск Spark-job на кластерах Dataproc
 
-Для запуска доступных Spark-задач необзодимо собрать проект в JAR:
+Для запуска доступных Spark-задач необходимо собрать проект в JAR:
 
 ```bash
 mvn clean package
