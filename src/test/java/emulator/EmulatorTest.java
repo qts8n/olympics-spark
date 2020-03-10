@@ -1,5 +1,10 @@
 package emulator;
 
+import com.google.protobuf.ByteString;
+import com.google.pubsub.v1.PubsubMessage;
+import com.google.pubsub.v1.PullRequest;
+import com.google.pubsub.v1.PullResponse;
+import com.google.pubsub.v1.ReceivedMessage;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -7,7 +12,6 @@ import org.junit.Test;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 
@@ -37,14 +41,29 @@ public class EmulatorTest {
 
     @Test
     public void testMessagePull() throws IOException {
-        List<String> messages = emulator.getMessages();
-        String receiveMessageText = messages.iterator().next();
-        Assert.assertNotNull(receiveMessageText);
+        PullRequest pullRequest = PullRequest.newBuilder()
+                .setReturnImmediately(false)
+                .setMaxMessages(1)
+                .setSubscription(emulator.getSubscription())
+                .build();
+        PullResponse pullResponse = emulator.getSubscriber().pullCallable().call(pullRequest);
+
+        ReceivedMessage message = pullResponse.getReceivedMessages(0);
+        Assert.assertNotNull(message);
+
+        PubsubMessage pubsubMessage = message.getMessage();
+        Assert.assertNotNull(pubsubMessage);
+
+        ByteString messageData = pubsubMessage.getData();
+        Assert.assertNotNull(messageData);
+
+        String messageString = pubsubMessage.getData().toStringUtf8();
+        Assert.assertNotNull(messageString);
 
         try (BufferedReader datasetReader = new BufferedReader(configManager.getDatasetReader())) {
             String line = datasetReader.readLine();
             Assert.assertNotNull(line);
-            Assert.assertEquals(line, receiveMessageText);
+            Assert.assertEquals(line, messageString);
         }
     }
 }

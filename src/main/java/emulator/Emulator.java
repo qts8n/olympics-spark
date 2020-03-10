@@ -13,12 +13,9 @@ import com.google.protobuf.ByteString;
 import com.google.pubsub.v1.*;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
-import scala.collection.JavaConverters;
-import scala.collection.Seq;
 
-import java.io.*;
-import java.util.ArrayList;
-import java.util.List;
+import java.io.BufferedReader;
+import java.io.IOException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -29,7 +26,7 @@ import java.util.concurrent.TimeoutException;
  *
  * Java API to push and pull Pub/Sub messages.
  *
- * https://dzone.com/articles/pubsub-local-emulator
+ * @link https://dzone.com/articles/pubsub-local-emulator
  */
 public class Emulator {
     private ConfigManager configManager;
@@ -104,6 +101,14 @@ public class Emulator {
         channel.shutdownNow();
     }
 
+    public String getSubscription() {
+        return subscription.getName();
+    }
+
+    public SubscriberStub getSubscriber() {
+        return subscriber;
+    }
+
     private TopicAdminClient createTopicAdmin(CredentialsProvider credentialsProvider) throws IOException {
         return TopicAdminClient.create(
                 TopicAdminSettings.newBuilder()
@@ -134,24 +139,5 @@ public class Emulator {
                 .setCredentialsProvider(credentialsProvider)
                 .build();
         return GrpcSubscriberStub.create(subscriberStubSettings);
-    }
-
-    public List<String> getMessages() {
-        PullRequest pullRequest = PullRequest.newBuilder()
-                .setMaxMessages(configManager.getEmulatorMaxLine())
-                .setSubscription(subscription.getName())
-                .build();
-        PullResponse pullResponse = subscriber.pullCallable().call(pullRequest);
-
-        List<String> messages = new ArrayList<>();
-        for (ReceivedMessage message : pullResponse.getReceivedMessagesList()) {
-            messages.add(message.getMessage().getData().toStringUtf8());
-        }
-        return messages;
-    }
-
-    public Seq<String> getMessagesSeq() {
-        List<String> messages = getMessages();
-        return JavaConverters.asScalaIteratorConverter(messages.iterator()).asScala().toSeq();
     }
 }

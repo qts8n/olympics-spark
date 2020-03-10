@@ -14,7 +14,7 @@
     </properties>
 
     <groupId>dataproc-spark</groupId>
-    <artifactId>spark-streaming-pubsub</artifactId>
+    <artifactId>olympics-spark</artifactId>
     <version>1.0-SNAPSHOT</version>
 
     <dependencies>

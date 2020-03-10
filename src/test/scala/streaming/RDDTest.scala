@@ -1,8 +1,7 @@
 package streaming
 
-import emulator.Emulator
 import org.apache.spark.SparkConf
-import org.apache.spark.rdd.RDD
+import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 import org.scalatest.{BeforeAndAfter, MustMatchers, WordSpec}
 
@@ -17,36 +16,24 @@ import org.scalatest.{BeforeAndAfter, MustMatchers, WordSpec}
  */
 class RDDTest extends WordSpec with MustMatchers with BeforeAndAfter {
   private var ssc: StreamingContext = _
-  private var emulator: Emulator = _
-  private var rdd: RDD[String] = _
+  private var stream: DStream[String] = _
 
   before {
-    emulator = new Emulator()
-    emulator.load()
 
-    val conf = new SparkConf()
-      .setAppName("unit-testing")
-      .setMaster("local[*]")
-    val messages: Seq[String] = emulator.getMessagesSeq
+    val conf = new SparkConf().setAppName("unit-testing").setMaster("local[*]")
     ssc = new StreamingContext(conf, Seconds(1))
-    rdd = ssc.sparkContext.parallelize(messages)
+    stream = DStreamFactory.getSource(ssc)
   }
 
   after {
-    emulator.clean()
+    ssc.awaitTerminationOrTimeout(5000)
     ssc.stop()
   }
 
   "compute metrics" should {
     "get message stream" in {
-       rdd.collect().foreach(println)
-       rdd.collect().length must be > 0
-    }
-
-    "top 10 cities" in {
-       Metrics.topCitiesRDD(rdd)
-         .take(10)
-         .foreach(medal => println(medal.city + " " + medal.amount))
+      stream.foreachRDD{ rdd => println(rdd.collect().length)}
+      ssc.start()
     }
   }
 }
