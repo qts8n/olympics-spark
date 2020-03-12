@@ -35,6 +35,15 @@ docker run --rm -it --volumes-from gcloud-config --network host --name pub-sub \
 рекомендуется указывать ключ `--volumes-from gcloud-config`, где `gcloud-config` -
 контейнер с данными об авторизации в сервисах Google.
 
+Если приведенная выше команда не работает, попробуйте запустить образ так (на Windows
+также придется удалить символы `\` в конце строк и объединить их в одну):
+
+```bash
+docker run --rm -it --volumes-from gcloud-config -p "8085:8085" --name pub-sub \
+    google/cloud-sdk gcloud beta emulators pubsub start --project=olympics-269511 \
+    --host-port=0.0.0.0:8085
+```
+
 #### Создание контейнера с данными об авторизации
 
 ```bash
