@@ -1,18 +1,30 @@
 package spark;
 
-import com.google.pubsub.v1.AcknowledgeRequest;
-import com.google.pubsub.v1.PullRequest;
-import com.google.pubsub.v1.PullResponse;
-import com.google.pubsub.v1.ReceivedMessage;
-import emulator.Emulator;
+import com.google.api.gax.core.CredentialsProvider;
+import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.api.gax.grpc.GrpcTransportChannel;
+import com.google.api.gax.rpc.ApiException;
+import com.google.api.gax.rpc.FixedTransportChannelProvider;
+import com.google.api.gax.rpc.StatusCode;
+import com.google.api.gax.rpc.TransportChannelProvider;
+import com.google.cloud.pubsub.v1.SubscriptionAdminClient;
+import com.google.cloud.pubsub.v1.SubscriptionAdminSettings;
+import com.google.cloud.pubsub.v1.stub.GrpcSubscriberStub;
+import com.google.cloud.pubsub.v1.stub.SubscriberStub;
+import com.google.cloud.pubsub.v1.stub.SubscriberStubSettings;
+import com.google.pubsub.v1.*;
+import emulator.ConfigManager;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.Status;
 import org.apache.spark.storage.StorageLevel;
 import org.apache.spark.streaming.receiver.Receiver;
+import pubsub.EmulatorPublisher;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 
 
@@ -25,91 +37,114 @@ import java.util.stream.Collectors;
  * @link https://venkateshiyer.net/spark-streaming-custom-receiver-for-google-pubsub-3dc9d4a4451e
  */
 public class EmulatorReceiver extends Receiver<String> {
-    private Emulator emulator;
-
     public EmulatorReceiver(StorageLevel storageLevel) throws IOException {
         super(storageLevel);
-        this.emulator = new Emulator();
     }
 
     public EmulatorReceiver() throws IOException {
-        this(StorageLevel.MEMORY_AND_DISK_2());
+        this(StorageLevel.MEMORY_ONLY());
     }
 
     @Override
     public void onStart() {
-        try {
-            emulator.load();
-        } catch (IOException | ExecutionException | InterruptedException | TimeoutException e) {
-            reportReadError(e);
-            stop(e.getMessage());
-            return;
-        }
-
         new Thread(this::receive).start();
     }
 
     @Override
     public void onStop() {
-        emulator.clean();
     }
 
     private void receive() {
-        // Maximum # of messages in each Pub/sub Pull request
-        int BATCH_SIZE = 500;
+        ConfigManager configManager;
+        try {
+            configManager = ConfigManager.getInstance();
+        } catch (FileNotFoundException e) {
+            stop("No config file was found", e);
+            return;
+        }
 
-        // Backoff time when pubsub is throttled
-        int MIN_BACKOFF_SECONDS = 1;
-        int MAX_BACKOFF_SECONDS = 64;
+        ManagedChannel channel = ManagedChannelBuilder.forTarget(configManager.getEmulatorHost()).usePlaintext().build();
+        TransportChannelProvider channelProvider = FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel));
+        CredentialsProvider credentialsProvider = NoCredentialsProvider.create();
+
+        SubscriptionAdminClient client = null;
+        Subscription subscription = null;
+        try {
+            SubscriptionAdminSettings subscriptionAdminSettings= SubscriptionAdminSettings.newBuilder()
+                    .setCredentialsProvider(credentialsProvider)
+                    .setTransportChannelProvider(channelProvider)
+                    .build();
+            client = SubscriptionAdminClient.create(subscriptionAdminSettings);
+            ProjectSubscriptionName subscriptionName = ProjectSubscriptionName.of(configManager.getProject(), configManager.getSubscription());
+
+            subscription = client.createSubscription(
+                    subscriptionName,
+                    EmulatorPublisher.getTopic(),
+                    PushConfig.getDefaultInstance(),
+                    0);
+        } catch (IOException ignored) {
+            channel.shutdownNow();
+            stop("Cannot create subscription with given credentials");
+            return;
+        } catch (ApiException exception) {
+            if (exception.getStatusCode().getCode() != StatusCode.Code.ALREADY_EXISTS) {
+                channel.shutdownNow();
+                stop("Cannot create subscription", exception);
+                return;
+            }
+        }
+
+        SubscriberStub subscriber;
+        try {
+            SubscriberStubSettings subscriberStubSettings = SubscriberStubSettings.newBuilder()
+                    .setTransportChannelProvider(channelProvider)
+                    .setCredentialsProvider(credentialsProvider)
+                    .build();
+            subscriber = GrpcSubscriberStub.create(subscriberStubSettings);
+        } catch (IOException ignored) {
+            channel.shutdownNow();
+            stop("Cannot create subscriber with given credentials");
+            return;
+        }
+
+        if (client == null || subscription == null) {
+            stop("Could not create client or subscription");
+            return;
+        }
 
         PullRequest pullRequest = PullRequest.newBuilder()
                 .setReturnImmediately(false)
-                .setMaxMessages(BATCH_SIZE)
-                .setSubscription(emulator.getSubscription())
+                .setMaxMessages(configManager.getEmulatorMaxLine())
+                .setSubscription(subscription.getName())
                 .build();
 
-        int backoffTimeSeconds = MIN_BACKOFF_SECONDS;
         do {
             try {
-                PullResponse pullResponse = emulator.getSubscriber().pullCallable().call(pullRequest);
+                PullResponse pullResponse = subscriber.pullCallable().call(pullRequest);
                 List<ReceivedMessage> receivedMessages = pullResponse.getReceivedMessagesList();
 
                 if (receivedMessages == null) continue;
 
                 store(receivedMessages.stream()
-                        .filter(m -> m.getMessage() != null &&
-                                m.getMessage().getData() != null)
+                        .filter(m -> m != null && m.getMessage() != null && m.getMessage().getData() != null)
                         .map(m -> m.getMessage().getData().toStringUtf8())
                         .filter(Objects::nonNull)
                         .iterator());
 
                 AcknowledgeRequest ackRequest = AcknowledgeRequest.newBuilder()
-                        .setSubscription(emulator.getSubscription())
+                        .setSubscription(configManager.getSubscription())
                         .addAllAckIds(receivedMessages
                                 .stream()
                                 .map(ReceivedMessage::getAckId)
                                 .collect(Collectors.toList()))
                         .build();
-                emulator.getSubscriber().acknowledgeCallable().call(ackRequest);
-                // Reset backoff time
-                backoffTimeSeconds = MIN_BACKOFF_SECONDS;
+                subscriber.acknowledgeCallable().call(ackRequest);
             } catch (Exception e) {
-                reportReadError(e);
-                wait(backoffTimeSeconds);
-                backoffTimeSeconds = Math.min(backoffTimeSeconds << 1, MAX_BACKOFF_SECONDS);
+                stop("Unable to read subscription", e);
             }
         } while (!isStopped());
-    }
 
-    private void reportReadError(Throwable e) {
-        stop("Unable to read subscription: " + emulator.getSubscription() + ". Retrying...", e);
-    }
-
-    private void wait(int backoffTimeSeconds) {
-        try {
-            Thread.sleep(1000 * backoffTimeSeconds);
-        } catch (InterruptedException ie) {
-            Thread.currentThread().interrupt();
-        }
+        client.deleteSubscription(configManager.getSubscription());
+        channel.shutdownNow();
     }
 }

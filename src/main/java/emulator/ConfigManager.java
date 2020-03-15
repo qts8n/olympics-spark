@@ -8,7 +8,7 @@ import java.util.Properties;
 /**
  * Config properties manager singleton.
  */
-public final class ConfigManager {
+public final class ConfigManager implements java.io.Serializable {
     private static ConfigManager instance;
     private Properties props;
 

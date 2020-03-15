@@ -2,7 +2,6 @@ package streaming
 
 import java.nio.charset.StandardCharsets
 
-import emulator.Emulator
 import org.apache.spark.storage.StorageLevel
 import org.apache.spark.streaming.StreamingContext
 import org.apache.spark.streaming.dstream.DStream
@@ -24,6 +23,6 @@ object DStreamFactory {
   }
 
   def getSource(ssc: StreamingContext): DStream[String] = {
-    ssc.receiverStream(new EmulatorReceiver(StorageLevel.MEMORY_ONLY))
+    ssc.receiverStream(new EmulatorReceiver())
   }
 }

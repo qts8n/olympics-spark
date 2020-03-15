@@ -34,17 +34,23 @@ public class CloudPubsubReceiver extends Receiver<String> {
     private String topicFullName;
     private String subscriptionFullName;
     private ConfigManager configManager;
+    private boolean emulated;
 
-    public CloudPubsubReceiver(String projectName, String topicName, String subscriptionName) throws FileNotFoundException {
-        super(StorageLevel.MEMORY_AND_DISK_2());
+    public CloudPubsubReceiver(String projectName, String topicName, String subscriptionName, StorageLevel storageLevel, boolean emulated) throws FileNotFoundException {
+        super(storageLevel);
         String projectFullName = "projects/" + projectName;
         this.topicFullName = projectFullName + "/topics/" + topicName;
         this.subscriptionFullName = projectFullName + "/subscriptions/" + subscriptionName;
         this.configManager = ConfigManager.getInstance();
+        this.emulated = emulated;
+    }
+
+    public CloudPubsubReceiver(String projectName, String topicName, String subscriptionName) throws FileNotFoundException {
+        this(projectName, topicName, subscriptionName, StorageLevel.MEMORY_ONLY(), true);
     }
 
     public void onStart() {
-        Pubsub client = createAuthorizedClient();
+        Pubsub client = emulated ? createEmulatorClient() : createAuthorizedClient();
         Subscription subscription = new Subscription().setTopic(topicFullName);
         try {
             // Create a subscription if it does not exist.
@@ -63,7 +69,7 @@ public class CloudPubsubReceiver extends Receiver<String> {
     public void onStop() {
         // Delete the subscription
         try {
-            Pubsub client = createAuthorizedClient();
+            Pubsub client = emulated ? createEmulatorClient() : createAuthorizedClient();
             client.projects().subscriptions().delete(subscriptionFullName).execute();
         } catch (GoogleJsonResponseException e) {
             if (e.getDetails().getCode() != HttpURLConnection.HTTP_NOT_FOUND) {
@@ -78,7 +84,7 @@ public class CloudPubsubReceiver extends Receiver<String> {
 
     // Pull messages from Pubsub and store as RDD.
     private void receive() {
-        Pubsub client = createAuthorizedClient();
+        Pubsub client = emulated ? createEmulatorClient() : createAuthorizedClient();
         if (client == null) {
             stop("Cannot create authorized client");
             return;
@@ -120,8 +126,6 @@ public class CloudPubsubReceiver extends Receiver<String> {
                     backoffTimeSeconds = MIN_BACKOFF_SECONDS;
                 }
             } catch (GoogleJsonResponseException e) {
-
-
                 if (e.getDetails().getCode() == HTTP_TOO_MANY_REQUESTS) {
                     // When PubSub is rate throttled, retry with exponential backoff.
                     reportError(
@@ -169,7 +173,7 @@ public class CloudPubsubReceiver extends Receiver<String> {
         return new Pubsub.Builder(httpTransport, jsonFactory, null)
                 .setApplicationName(configManager.getAppName())
                 .setSuppressAllChecks(true)
-                .setRootUrl(configManager.getEmulatorHost())
+                .setRootUrl("http://" + configManager.getEmulatorHost())
                 .build();
     }
 
