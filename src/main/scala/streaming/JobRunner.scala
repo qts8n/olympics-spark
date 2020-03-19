@@ -19,7 +19,7 @@ object JobRunner {
     val ssc = new StreamingContext(sparkConf, Seconds(slidingInterval))
     ssc.checkpoint(checkpointDirectory + '/' + getJob(sparkConf))
 
-    val messagesStream = DataStreaming.getSource(ssc, configManager.getProject, configManager.getSubscription)
+    val messagesStream = DStreamFactory.getSource(ssc, configManager.getProject, configManager.getSubscription)
     process(messagesStream, windowLength, slidingInterval)
     ssc
   }

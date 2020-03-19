@@ -23,7 +23,7 @@ class StreamingTest extends WordSpec with MustMatchers with BeforeAndAfter {
       .setAppName("unit-testing")
       .setMaster("local[*]")
     ssc = new StreamingContext(conf, Seconds(1))
-    stream = DataStreaming.getSource(ssc, configManager.getProject, configManager.getSubscription)
+    stream = DStreamFactory.getSource(ssc, configManager.getProject, configManager.getSubscription)
   }
 
   after {
