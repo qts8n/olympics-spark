@@ -17,7 +17,9 @@ public class PublisherTest {
     @Test
     public void testMessagePublish() throws IOException {
         EmulatorPublisher.createTopic();
+        EmulatorPublisher.createSubscription();
         EmulatorPublisher.publishMessages();
+        EmulatorPublisher.deleteSubscription();
         EmulatorPublisher.deleteTopic();
     }
 }

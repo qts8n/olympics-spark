@@ -7,18 +7,17 @@ import com.google.api.gax.core.NoCredentialsProvider;
 import com.google.api.gax.grpc.GrpcTransportChannel;
 import com.google.api.gax.rpc.FixedTransportChannelProvider;
 import com.google.api.gax.rpc.TransportChannelProvider;
-import com.google.cloud.pubsub.v1.Publisher;
-import com.google.cloud.pubsub.v1.TopicAdminClient;
-import com.google.cloud.pubsub.v1.TopicAdminSettings;
+import com.google.cloud.pubsub.v1.*;
 import com.google.protobuf.ByteString;
+import com.google.pubsub.v1.ProjectSubscriptionName;
 import com.google.pubsub.v1.ProjectTopicName;
 import com.google.pubsub.v1.PubsubMessage;
+import com.google.pubsub.v1.PushConfig;
 import emulator.ConfigManager;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 
 import java.io.BufferedReader;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,31 +26,41 @@ import java.util.concurrent.TimeUnit;
 
 
 public class EmulatorPublisher {
-    private static ManagedChannel getChannel() throws FileNotFoundException {
+    public static ManagedChannel getChannel() throws IOException {
         return ManagedChannelBuilder
                 .forTarget(ConfigManager.getInstance().getEmulatorHost())
                 .usePlaintext()
                 .build();
     }
 
-    private static TopicAdminClient createAdminClient(ManagedChannel channel) throws IOException {
-        TransportChannelProvider channelProvider = FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel));
-        CredentialsProvider credentialsProvider = NoCredentialsProvider.create();
+    public static TransportChannelProvider createProvider(ManagedChannel channel) {
+        return FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel));
+    }
+
+    private static TopicAdminClient createTopicAdminClient(ManagedChannel channel) throws IOException {
         return TopicAdminClient.create(
                 TopicAdminSettings.newBuilder()
-                        .setTransportChannelProvider(channelProvider)
-                        .setCredentialsProvider(credentialsProvider)
+                        .setTransportChannelProvider(createProvider(channel))
+                        .setCredentialsProvider(NoCredentialsProvider.create())
                         .build());
     }
 
-    public static ProjectTopicName getTopic() throws FileNotFoundException {
+    private static SubscriptionAdminClient createSubscriptionAdminClient(ManagedChannel channel) throws IOException {
+        SubscriptionAdminSettings subscriptionAdminSettings= SubscriptionAdminSettings.newBuilder()
+                .setTransportChannelProvider(createProvider(channel))
+                .setCredentialsProvider(NoCredentialsProvider.create())
+                .build();
+        return SubscriptionAdminClient.create(subscriptionAdminSettings);
+    }
+
+    public static ProjectTopicName getTopic() throws IOException {
         ConfigManager configManager = ConfigManager.getInstance();
         return ProjectTopicName.of(configManager.getProject(), configManager.getTopic());
     }
 
     public static void createTopic() throws IOException {
         ManagedChannel channel = getChannel();
-        try (TopicAdminClient client = createAdminClient(channel)) {
+        try (TopicAdminClient client = createTopicAdminClient(channel)) {
             client.createTopic(getTopic());
         } finally {
             channel.shutdownNow();
@@ -60,8 +69,35 @@ public class EmulatorPublisher {
 
     public static void deleteTopic() throws IOException {
         ManagedChannel channel = getChannel();
-        try (TopicAdminClient client = createAdminClient(channel)) {
+        try (TopicAdminClient client = createTopicAdminClient(channel)) {
             client.deleteTopic(getTopic());
+        } finally {
+            channel.shutdownNow();
+        }
+    }
+
+    public static ProjectSubscriptionName getSubscription() throws IOException {
+        ConfigManager configManager = ConfigManager.getInstance();
+        return ProjectSubscriptionName.of(configManager.getProject(), configManager.getSubscription());
+    }
+
+    public static void createSubscription() throws IOException {
+        ManagedChannel channel = getChannel();
+        try (SubscriptionAdminClient client = createSubscriptionAdminClient(channel)) {
+            client.createSubscription(
+                    getSubscription(),
+                    getTopic(),
+                    PushConfig.getDefaultInstance(),
+                    0);
+        } finally {
+            channel.shutdownNow();
+        }
+    }
+
+    public static void deleteSubscription() throws IOException {
+        ManagedChannel channel = getChannel();
+        try (SubscriptionAdminClient client = createSubscriptionAdminClient(channel)) {
+            client.deleteSubscription(getSubscription());
         } finally {
             channel.shutdownNow();
         }
@@ -72,7 +108,7 @@ public class EmulatorPublisher {
         List<ApiFuture<String>> messageIdFutures = new ArrayList<>();
         ManagedChannel channel = getChannel();
         try {
-            TransportChannelProvider channelProvider = FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel));
+            TransportChannelProvider channelProvider = createProvider(channel);
             CredentialsProvider credentialsProvider = NoCredentialsProvider.create();
 
             // Create a publisher instance with default settings bound to the topic
