@@ -10,4 +10,4 @@ out
 tags
 *.csv
 
-src/main/resources/config.properties
+src/main/resources
