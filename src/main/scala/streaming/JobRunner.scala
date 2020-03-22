@@ -8,6 +8,9 @@ import streaming.Metrics.process
 
 
 object JobRunner {
+  // TODO: move into the ConfigManager or args
+  val gcpTmpBucket = "tmp-bucket-4234453"
+
   def getJob(sparkConf: SparkConf): String = {
     val yarnTags = sparkConf.get("spark.yarn.tags")
     yarnTags.split(",").filter(_.startsWith("dataproc_job")).head
@@ -17,6 +20,9 @@ object JobRunner {
     val configManager = ConfigManager.getInstance()
 
     val spark = SparkSession.builder().appName(configManager.getAppName).getOrCreate()
+
+    spark.conf.set("temporaryGcsBucket", gcpTmpBucket)
+
     val ssc = new StreamingContext(spark.sparkContext, Seconds(slidingInterval))
     ssc.checkpoint(checkpointDirectory + '/' + getJob(spark.sparkContext.getConf))
 
@@ -27,7 +33,7 @@ object JobRunner {
 
   def main(args: Array[String]): Unit = {
     if (args.length != 4) {
-      System.err.println("ERROR: invalid argument number: " + args.length + " (expected 4)")
+      System.err.println("ERROR: invalid argument number: " + args.length)
       System.exit(1)
     }
 

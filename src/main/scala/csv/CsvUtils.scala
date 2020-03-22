@@ -1,9 +1,8 @@
 package csv
 
 import scala.collection.mutable.ArrayBuffer
-
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.{SparkSession, Dataset, Row, Encoder}
+import org.apache.spark.sql._
 import org.apache.spark.rdd.RDD
 
 import scala.util.Try
@@ -129,16 +128,20 @@ object CsvUtils {
   // Includes fragments from spark-csv (https://github.com/databricks/spark-csv) [Apache 2.0 LICENSE]
   // Specifically from buildScan method from the file /src/main/scala/com/databricks/spark/csv/CsvRelation.scala
   // (https://github.com/databricks/spark-csv/blob/master/src/main/scala/com/databricks/spark/csv/CsvRelation.scala)
-  def datasetFromCSV[T](rdd: RDD[String], encoder: Encoder[T], delimiter: Char = ',', quote: Char = '"',
-                        parseMode: String = "DROPMALFORMED", nullValue: String = "NA"): Dataset[T] = {
-    val schema = encoder.schema
+  def datframeFromCSV[T](rdd: RDD[String], schema: StructType, delimiter: Char = ',', quote: Char = '"',
+                         parseMode: String = "DROPMALFORMED", nullValue: String = "NA"): DataFrame = {
     val rowRDD = parseMode.toUpperCase() match {
       case "FAILFAST" => rdd.map(line => parseCSVLine(line, schema, delimiter, quote, nullValue))
       case "DROPMALFORMED" => rdd.flatMap(line => Try{parseCSVLine(line, schema, delimiter, quote, nullValue)}.toOption)
       case _ => throw new IllegalArgumentException(s"""Unknown parse mode: \"$parseMode\"""")
     }
 
-    val dataFrame = SparkSession.builder().getOrCreate().createDataFrame(rowRDD, schema)
-    dataFrame.as(encoder)
+    SparkSession.builder().getOrCreate().createDataFrame(rowRDD, schema)
+  }
+
+  def datasetFromCSV[T](rdd: RDD[String], encoder: Encoder[T], delimiter: Char = ',', quote: Char = '"',
+                        parseMode: String = "DROPMALFORMED", nullValue: String = "NA"): Dataset[T] = {
+    val dataframe = datframeFromCSV(rdd, encoder.schema, delimiter, quote, parseMode, nullValue)
+    dataframe.as(encoder)
   }
 }
