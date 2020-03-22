@@ -4,8 +4,8 @@ import org.apache.spark.streaming.Seconds
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.sql.functions.col
 import csv.CsvUtils
-import data.eventEncoder
-import org.apache.spark.sql.SaveMode
+import data.{Event, eventEncoder}
+import org.apache.spark.sql.{DataFrame, Dataset, SaveMode}
 
 
 /**
@@ -13,20 +13,53 @@ import org.apache.spark.sql.SaveMode
   */
 object Metrics {
   // TODO: move into the ConfigManager or args
-  val gcpStorageDumpPath = "gs://my-very-own-bucket-1/results/"
+
+  val gcpStorageDumpPath = "gs://my-very-own-bucket-1/results"
   val gcpBigQueryDataset = "dataset"
-  val gcpBigQueryTable   = "test"
+
+  val getMedalsByYear: Dataset[Event] => DataFrame =
+    _.filter(_.year != null).filter(_.medal != null)
+     .groupBy(col("year")).count()
+
+  val getTopCitiesByMedalCount: Dataset[Event] => DataFrame =
+    _.filter(_.city != null).filter(_.medal != null)
+     .groupBy(col("city")).count().sort(-col("count"))
+     .limit(10)
+
+  val getTopCountriesByGoldMedalCount: Dataset[Event] => DataFrame =
+    _.filter(_.team != null).filter(_.medal.toLowerCase.equals("gold"))
+     .groupBy(col("team")).count().sort(-col("count"))
+     .limit(10)
+
+  case class MetricInfo(metric: Dataset[Event] => DataFrame, description: String, id: String)
+
+  val metrics: Seq[MetricInfo] = Seq(
+    MetricInfo(getMedalsByYear, "Medals by year", "medals_by_year"),
+    MetricInfo(getTopCitiesByMedalCount, "Top 10 cities by number of medals", "top_10_cities"),
+    MetricInfo(getTopCountriesByGoldMedalCount, "Top 10 countries by number of gold medals", "top_10_countries")
+  )
 
   def process(input: DStream[String], windowLength: Int, slidingInterval: Int): Unit = {
     input.window(Seconds(windowLength), Seconds(slidingInterval)).foreachRDD(rdd => {
-      val topMedalsByYear = CsvUtils.datasetFromCSV(rdd, eventEncoder).filter(_.year != null).filter(_.medal != null)
-        .groupBy(col("year")).count().sort(-col("count")).limit(10)
-      topMedalsByYear.write.csv(s"${gcpStorageDumpPath}${rdd.id}.csv");
-      topMedalsByYear.write.format("com.google.cloud.spark.bigquery")
-        .option("table",s"${gcpBigQueryDataset}.${gcpBigQueryTable}")
-        .mode(SaveMode.Append)
-        .save()
-      println(topMedalsByYear.show(10))
+      if (rdd.isEmpty()) {
+        println(s"Current RDD (#${rdd.id}) is empty.")
+      } else {
+        val rddSize = rdd.count()
+        println(s"The size of the current RDD (#${rdd.id}) is $rddSize.")
+
+        val dataset = CsvUtils.datasetFromCSV(rdd, eventEncoder)
+        for (MetricInfo(metric, description, id) <- metrics) {
+          val dataframe = metric(dataset)
+          dataframe.write.csv(s"$gcpStorageDumpPath/$rdd.id/$id");
+          dataframe.write.format("com.google.cloud.spark.bigquery")
+            .option("table", s"$gcpBigQueryDataset.$id")
+            .mode(SaveMode.Append)
+            .save()
+
+          println(s"${description}:")
+          println(dataframe.show(10))
+        }
+      }
     })
   }
 }
