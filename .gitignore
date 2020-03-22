@@ -9,3 +9,5 @@ out
 *.vim
 tags
 *.csv
+
+src/main/resources/config.properties
