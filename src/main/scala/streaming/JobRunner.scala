@@ -9,7 +9,9 @@ import streaming.Metrics.process
 
 object JobRunner {
   // TODO: move into the ConfigManager or args
-  val gcpTmpBucket = "tmp-bucket-4234453"
+  val GcpTmpBucket = "tmp-bucket-4234453"
+  val LimitPartitions = true
+  val NumPartitions = 4
 
   def getJob(sparkConf: SparkConf): String = {
     val yarnTags = sparkConf.get("spark.yarn.tags")
@@ -18,16 +20,18 @@ object JobRunner {
 
   def createStreamingContext(windowLength: Int, slidingInterval: Int, checkpointDirectory: String): StreamingContext = {
     val configManager = ConfigManager.getInstance()
-
     val spark = SparkSession.builder().appName(configManager.getAppName).getOrCreate()
 
-    spark.conf.set("temporaryGcsBucket", gcpTmpBucket)
+    spark.conf.set("temporaryGcsBucket", GcpTmpBucket)
+    if (LimitPartitions)
+      spark.conf.set("spark.sql.shuffle.partitions", NumPartitions)
 
     val ssc = new StreamingContext(spark.sparkContext, Seconds(slidingInterval))
     ssc.checkpoint(checkpointDirectory + '/' + getJob(spark.sparkContext.getConf))
 
     val messagesStream = DStreamFactory.getSource(ssc, configManager.getProject, configManager.getSubscription)
-    process(messagesStream, windowLength, slidingInterval)
+    val inputStream = if (LimitPartitions) messagesStream.transform(_.coalesce(NumPartitions)) else messagesStream
+    process(inputStream, windowLength, slidingInterval)
     ssc
   }
 
@@ -38,7 +42,6 @@ object JobRunner {
     }
 
     val Seq(windowLength, slidingInterval, totalRunningTime, checkpointDirectory) = args.toSeq
-
     val ssc = createStreamingContext(windowLength.toInt, slidingInterval.toInt, checkpointDirectory)
 
     ssc.start()
