@@ -8,6 +8,10 @@ out
 *.sw
 *.vim
 tags
-*.csv
 
-src/main/resources
+*.csv
+config.properties
+
+*.xml
+!pom.xml
+spark-warehouse

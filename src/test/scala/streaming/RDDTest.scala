@@ -3,14 +3,14 @@ package streaming
 import java.sql.Timestamp
 import java.text.SimpleDateFormat
 
+import csv.CsvUtils
+import data._
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.functions.lit
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.streaming.{Seconds, StreamingContext}
 import org.scalatest.{BeforeAndAfter, MustMatchers, WordSpec}
 import pubsub.EmulatorPublisher
-import csv.CsvUtils
-import data._
-import org.apache.spark.sql.functions.{col, lit}
 import streaming.Metrics._
 
 /**

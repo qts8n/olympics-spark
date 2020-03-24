@@ -48,6 +48,26 @@ public final class ConfigManager implements java.io.Serializable {
         return props.getProperty("emulator-host", "localhost:8085");
     }
 
+    public String getBigQueryDataset() {
+        return props.getProperty("dataset-bigquery");
+    }
+
+    public String getGcpDumpPath() {
+        return props.getProperty("gcp-dump-storage");
+    }
+
+    public String getGcpTempStorage() {
+        return props.getProperty("gcp-temp-storage");
+    }
+
+    public boolean getPartitionsLimitedFlag() {
+        return Boolean.parseBoolean(props.getProperty("partitions-limited"));
+    }
+
+    public int getPartitionsNumber() {
+        return Integer.parseInt(props.getProperty("partitions-number", "4"));
+    }
+
     public int getEmulatorMaxLine() throws NumberFormatException {
         return Integer.parseInt(props.getProperty("emulator-maxline", "50"));
     }

@@ -8,11 +8,6 @@ import streaming.Metrics.process
 
 
 object JobRunner {
-  // TODO: move into the ConfigManager or args
-  val GcpTmpBucket = "tmp-bucket-4234453"
-  val LimitPartitions = true
-  val NumPartitions = 4
-
   def getJob(sparkConf: SparkConf): String = {
     val yarnTags = sparkConf.get("spark.yarn.tags")
     yarnTags.split(",").filter(_.startsWith("dataproc_job")).head
@@ -20,17 +15,21 @@ object JobRunner {
 
   def createStreamingContext(windowLength: Int, slidingInterval: Int, checkpointDirectory: String): StreamingContext = {
     val configManager = ConfigManager.getInstance()
+    val isLimited = configManager.getPartitionsLimitedFlag
+    val pNum = configManager.getPartitionsNumber
+
     val spark = SparkSession.builder().appName(configManager.getAppName).getOrCreate()
 
-    spark.conf.set("temporaryGcsBucket", GcpTmpBucket)
-    if (LimitPartitions)
-      spark.conf.set("spark.sql.shuffle.partitions", NumPartitions)
+    spark.conf.set("temporaryGcsBucket", configManager.getGcpTempStorage)
+    if (isLimited) {
+      spark.conf.set("spark.sql.shuffle.partitions", pNum)
+    }
 
     val ssc = new StreamingContext(spark.sparkContext, Seconds(slidingInterval))
     ssc.checkpoint(checkpointDirectory + '/' + getJob(spark.sparkContext.getConf))
 
     val messagesStream = DStreamFactory.getSource(ssc, configManager.getProject, configManager.getSubscription)
-    val inputStream = if (LimitPartitions) messagesStream.transform(_.coalesce(NumPartitions)) else messagesStream
+    val inputStream = if (isLimited) messagesStream.transform(_.coalesce(pNum)) else messagesStream
     process(inputStream, windowLength, slidingInterval)
     ssc
   }

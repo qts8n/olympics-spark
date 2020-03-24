@@ -10,15 +10,13 @@ import data._
 import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 import java.text.SimpleDateFormat
 
+import emulator.ConfigManager
+
 
 /**
-  * DStream and RDD pipelines.
-  */
+ * DStream and RDD pipelines.
+ */
 object Metrics {
-  // TODO: move into the ConfigManager or args
-  val GcpStorageDumpPath = "gs://my-very-own-bucket-1/results"
-  val GcpBigQueryDataset = "dataset"
-
   val getMedalsByYear: Dataset[FullEvent] => DataFrame =
     _.filter(_.year != null).filter(_.medal != null)
      .groupBy(col("year")).count()
@@ -57,6 +55,9 @@ object Metrics {
   )
 
   def process(input: DStream[String], windowLength: Int, slidingInterval: Int): Unit = {
+    val configManager = ConfigManager.getInstance()
+    val gcpStorageDumpPath = configManager.getGcpDumpPath
+    val gcpBigQueryDataset = configManager.getBigQueryDataset
     input.window(Seconds(windowLength), Seconds(slidingInterval)).foreachRDD{rdd =>
       if (rdd.isEmpty()) {
         println(s"Current RDD (#${rdd.id}) is empty.")
@@ -76,10 +77,10 @@ object Metrics {
             .withColumn("timestamp", lit(timestamp))
 
           plainDataframe.write
-            .csv(s"$GcpStorageDumpPath/$directory/$name")
+            .csv(s"$gcpStorageDumpPath/$directory/$name")
           stampedDataframe.write
             .format("com.google.cloud.spark.bigquery")
-            .option("table", s"$GcpBigQueryDataset.$name")
+            .option("table", s"$gcpBigQueryDataset.$name")
             .mode("append")
             .save()
 
