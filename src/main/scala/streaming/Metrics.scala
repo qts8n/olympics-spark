@@ -28,11 +28,6 @@ object Metrics {
      .groupBy(col("city")).count().sort(-col("count"))
      .limit(10)
 
-  val getTopCountriesByGoldMedalCount: Dataset[FullEvent] => DataFrame =
-    _.filter(_.team != null).filter(_.medal != null).filter(_.medal.toLowerCase.equals("gold"))
-     .groupBy(col("year"), col("region")).count().sort(-col("count"))
-     .limit(10)
-
   val getTopCountriesByGoldMedalCountPerYear: Dataset[FullEvent] => DataFrame = { dataset =>
     val countsByYearAndCountry = dataset
       .filter(_.year != null).filter(_.region != null).filter(_.medal != null).filter(_.medal.toLowerCase.equals("gold"))
