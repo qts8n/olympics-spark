@@ -215,8 +215,7 @@ deactivate
 
 1. задайте нужные настройки в файле `config.properties` в папке `resources`
 2. установите зависимости (`mvn install`)
-3. соберите package (`mvn clean package -DskipTests`)
-4. подготовьте package (`zip -d target/olympics-spark-1.0-SNAPSHOT.jar META-INF/*.RSA META-INF/*.DSA META-INF/*.SF`)
+3. соберите package (`mvn clean package`)
 
 Исполняемый файл готов и находится в папке `target`. Перенесите его в свой bucket.
 Еще раз убедитесь, что проект Google Cloud собран правильно, а именно:
