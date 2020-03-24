@@ -83,12 +83,168 @@ gcloud beta emulators pubsub start --project=olympics-269511
 
 ### Запуск Spark-job на кластерах Dataproc
 
-Для запуска доступных Spark-задач необходимо собрать проект в JAR:
+#### Подготовка проекта
+
+Чтобы запустить приложение на Dataproc нужно выполнить ряд действий в Cloud Shell
+для подготовки окружения.
+
+Включение необходимых сервисов:
 
 ```bash
-mvn clean package
+gcloud services enable \
+  dataproc.googleapis.com \
+  pubsub.googleapis.com 
 ```
 
-Сам JAR-файл уже с помощью утилиты `gcloud` отправляется на уже запущенный кластер.
-Подробнее об этом [тут](https://cloud.google.com/solutions/using-apache-spark-dstreams-with-dataproc-and-pubsub#submitting_the_spark_streaming_job)
+Создания топика и подписки в очереди Pub/Sub:
+
+```bash
+export TOPIC=olympics-topic
+export SUBSCRIPTION=olympics-sub
+
+gcloud pubsub topics create $TOPIC
+gcloud pubsub subscriptions create $SUBSCRIPTION --topic=$TOPIC
+```
+
+Создание датасета в BigQuery:
+
+```bash
+export DATASET=dataset
+
+bq --location=europe-west3 mk \
+  --dataset \
+  $DATASET
+```
+
+Создание сервисного аккаунта и добавление необходимых привилегий:
+
+```bash
+export PROJECT=$(gcloud info --format='value(config.project)')
+export SERVICE_ACCOUNT_NAME=dataproc-service-account
+export SERVICE_ACCOUNT_ADDRESS=$SERVICE_ACCOUNT_NAME@$PROJECT.iam.gserviceaccount.com
+
+gcloud iam service-accounts create $SERVICE_ACCOUNT_NAME
+
+gcloud projects add-iam-policy-binding $PROJECT \
+  --role roles/dataproc.worker \
+  --member="serviceAccount:$SERVICE_ACCOUNT_ADDRESS"
+
+gcloud beta pubsub subscriptions add-iam-policy-binding \
+  $SUBSCRIPTION \
+  --role roles/pubsub.subscriber \
+  --member="serviceAccount:$SERVICE_ACCOUNT_ADDRESS"
+
+gcloud projects add-iam-policy-binding $PROJECT \
+  --role roles/bigquery.dataEditor \
+  --member="serviceAccount:$SERVICE_ACCOUNT_ADDRESS"
+
+gcloud projects add-iam-policy-binding $PROJECT \
+  --role roles/bigquery.jobUser \
+  --member="serviceAccount:$SERVICE_ACCOUNT_ADDRESS"
+```
+
+Запуск Dataproc кластеров:
+
+```bash
+
+export CLUSTER=demo-cluster
+
+gcloud dataproc clusters create demo-cluster \
+  --region=europe-west3 \
+  --zone=europe-west3-a \
+  --master-machine-type=n1-standard-4 \
+  --num-workers=2 \
+  --worker-machine-type=n1-standard-2 \
+  --scopes=pubsub,bigquery \
+  --image-version=1.2 \
+  --service-account=$SERVICE_ACCOUNT_ADDRESS
+```
+
+После успешного выполнения предыдущих действий вам нужно подготовить
+хранилище для датасета и исполняемых jar-файлов. Для этого:
+
+1. создайте bucket (`gsutil mb -l europe-west3 gs://my-very-own-bucket-1`)
+2. загрузите туда датасет в формате csv
+3. загрузите также необходимые jar-файлы
+
+Используемый коннектор для BigQuery требует временного хранилища, которое должно
+находится в том же регионе, что и хранилище с jar-файлом. Про компиляцию
+в jar-файл подробнее смотрите [далее](#run-spark-job).
+
+```bash
+export TMP_BUCKET=some-bucket-543645434
+
+gsutil mb -l europe-west3 gs://$TMP_BUCKET
+``` 
+
+#### Генератор сообщений для Pub/Sub
+
+Spark-job получает сообщения из Pub/Sub подписки, которая была создана на этапе
+подготовки проекта. На момент создания подписки она пуста. Чтобы загрузить в очередь
+датасет используйте генератор. Для этого:
+
+1. загрузите исходный код генератора из папки `generator` в корне проекта на VM instance
+2. создайте виртуальное окружение для python
+3. установите требуемые зависимости из файла `requirements.txt` *(may take some time)*
+4. запустите генератор в фоне
+
+```bash
+export PROJECT=$(gcloud info --format='value(config.project)')
+export GENERATOR_PATH=~/generator
+export TOPIC=olympics-topic
+export BUCKET=my-very-own-bucket-1
+export DIRECTORY=data
+
+cd $GENERATOR_PATH
+virtualenv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+python generatord.py $PROJECT $TOPIC $BUCKET $DIRECTORY 5 50000 &
+
+deactivate
+```
+
+**NOTE:** Здесь переменные `$BUCKET` и `$GENERATOR_PATH` могут разниться с тем,
+что есть у вас.
+
+#### Run Spark-job
+
+Для того, чтобы скомпилировать jar-файл для запуска, клонируйте
+этот репозиторий и соберите package при помощи Maven:
+
+1. задайте нужные настройки в файле `config.properties` в папке `resources`
+2. установите зависимости (`mvn install`)
+3. соберите package (`mvn clean package`)
+
+Исполняемый файл готов и находится в папке `target`. Перенесите его в свой bucket.
+Еще раз убедитесь, что проект Google Cloud собран правильно, а именно:
+
+1. в подписке Pub/Sub есть сообщения
+2. jar-файл находится в bucket
+3. датасет в BigQuery создан
+4. временный bucket создан и находится в том же регионе
+
+Запустите Spark-job через Cloud Sell:
+
+```bash
+export PROJECT=$(gcloud info --format='value(config.project)')
+export CLUSTER=demo-cluster
+export BUCKET=my-very-own-bucket-1
+export JAR_NAME=olympics-spark-1.0-SNAPSHOT.jar
+export JAR="gs://$BUCKET/jars/$JAR_NAME"
+export SPARK_PROPERTIES="spark.dynamicAllocation.enabled=false,spark.streaming.receiver.writeAheadLog.enabled=true"
+export ARGUMENTS="10 10 5 hdfs:///user/checkpoint"
+
+gcloud dataproc jobs submit spark \
+  --region=europe-west3 \
+  --cluster $CLUSTER \
+  --async \
+  --jar $JAR \
+  --max-failures-per-hour 10 \
+  --properties $SPARK_PROPERTIES \
+  -- $ARGUMENTS
+```
+
+Подробнее о работе с GCP [тут](https://cloud.google.com/solutions/using-apache-spark-dstreams-with-dataproc-and-pubsub#submitting_the_spark_streaming_job)
 и [тут](https://cloud.google.com/sdk/gcloud/reference/dataproc/jobs/submit/spark).
