@@ -6,8 +6,8 @@ import org.apache.spark.streaming.Seconds
 import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.sql.functions.{col, lit}
 import csv.CsvUtils
-import data.{Event, eventEncoder}
-import org.apache.spark.sql.{DataFrame, Dataset}
+import data._
+import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
 import java.text.SimpleDateFormat
 
 
@@ -19,26 +19,46 @@ object Metrics {
   val GcpStorageDumpPath = "gs://my-very-own-bucket-1/results"
   val GcpBigQueryDataset = "dataset"
 
-  val getMedalsByYear: Dataset[Event] => DataFrame =
+  val getMedalsByYear: Dataset[FullEvent] => DataFrame =
     _.filter(_.year != null).filter(_.medal != null)
      .groupBy(col("year")).count()
 
-  val getTopCitiesByMedalCount: Dataset[Event] => DataFrame =
+  val getTopCitiesByMedalCount: Dataset[FullEvent] => DataFrame =
     _.filter(_.city != null).filter(_.medal != null)
      .groupBy(col("city")).count().sort(-col("count"))
      .limit(10)
 
-  val getTopCountriesByGoldMedalCount: Dataset[Event] => DataFrame =
+  val getTopCountriesByGoldMedalCount: Dataset[FullEvent] => DataFrame =
     _.filter(_.team != null).filter(_.medal != null).filter(_.medal.toLowerCase.equals("gold"))
-     .groupBy(col("team")).count().sort(-col("count"))
+     .groupBy(col("year"), col("region")).count().sort(-col("count"))
      .limit(10)
 
-  case class MetricInfo(metric: Dataset[Event] => DataFrame, description: String, id: String)
+  val getTopCountriesByGoldMedalCountPerYear: Dataset[FullEvent] => DataFrame = { dataset =>
+    val countsByYearAndCountry = dataset
+      .filter(_.year != null).filter(_.region != null).filter(_.medal != null).filter(_.medal.toLowerCase.equals("gold"))
+      .groupBy(col("year"), col("region")).count()
+    countsByYearAndCountry.createOrReplaceTempView("countsByYearAndCountry")
+    SparkSession.builder().getOrCreate().sql(
+      """
+        |SELECT ranks.year AS year,
+        |       ranks.region AS region,
+        |       ranks.count as count
+        |FROM (
+        |    SELECT year,
+        |           region,
+        |           count,
+        |           row_number() over (partition by year order by count desc) as region_rank
+        |    FROM countsByYearAndCountry) ranks
+        |where region_rank <= 10
+      """.stripMargin)
+  }
+
+  case class MetricInfo(metric: Dataset[FullEvent] => DataFrame, description: String, id: String)
 
   val metrics: Seq[MetricInfo] = Seq(
     MetricInfo(getMedalsByYear, "Medals by year", "medals_by_year"),
     MetricInfo(getTopCitiesByMedalCount, "Top 10 cities by number of medals", "top_10_cities"),
-    MetricInfo(getTopCountriesByGoldMedalCount, "Top 10 countries by number of gold medals", "top_10_countries")
+    MetricInfo(getTopCountriesByGoldMedalCountPerYear, "Top 10 countries by number of gold medals per year", "top_10_countries_per_year")
   )
 
   def process(input: DStream[String], windowLength: Int, slidingInterval: Int): Unit = {
@@ -53,7 +73,7 @@ object Metrics {
         val timestampString = new SimpleDateFormat("dd:MM:yyyy_HH:mm:ss").format(timestamp)
         val directory = f"${rdd.id}%05d_$timestampString"
 
-        val dataset = CsvUtils.datasetFromCSV(rdd, eventEncoder)
+        val dataset = CsvUtils.datasetFromCSV(rdd, FullEventEncoder)
         for (MetricInfo(metric, description, name) <- metrics) {
           val plainDataframe = metric(dataset)
           val stampedDataframe = plainDataframe
