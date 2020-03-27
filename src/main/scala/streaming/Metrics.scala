@@ -7,10 +7,11 @@ import org.apache.spark.streaming.dstream.DStream
 import org.apache.spark.sql.functions.{col, lit}
 import csv.CsvUtils
 import data._
-import org.apache.spark.sql.{DataFrame, Dataset, SparkSession}
+import org.apache.spark.sql.{DataFrame, Dataset, Encoders, SparkSession}
 import java.text.SimpleDateFormat
 
 import emulator.ConfigManager
+import org.apache.spark.storage.StorageLevel
 
 
 /**
@@ -19,61 +20,62 @@ import emulator.ConfigManager
 object Metrics {
   val getMedalsByYear: Dataset[FullEvent] => DataFrame =
     _.filter(_.year != null).filter(_.medal != null)
-     .groupBy(col("year")).count()
+      .groupBy(col("year")).count()
 
   val getTopCitiesByMedalCount: Dataset[FullEvent] => DataFrame =
     _.filter(_.city != null).filter(_.medal != null)
-     .groupBy(col("city")).count().sort(-col("count"))
-     .limit(10)
+      .groupBy(col("city")).count().sort(-col("count"))
 
   val getTopCountriesByGoldMedalCountPerYear: Dataset[FullEvent] => DataFrame = { dataset =>
-    val countsByYearAndCountry = dataset
+    dataset
       .filter(_.year != null).filter(_.region != null).filter(_.medal != null).filter(_.medal.toLowerCase.equals("gold"))
       .groupBy(col("year"), col("region")).count()
-    countsByYearAndCountry.createOrReplaceTempView("countsByYearAndCountry")
-    SparkSession.builder().getOrCreate().sql(
-      """
-        |SELECT ranks.year AS year,
-        |       ranks.region AS region,
-        |       ranks.count as count
-        |FROM (
-        |    SELECT year,
-        |           region,
-        |           count,
-        |           row_number() over (partition by year order by count desc) as region_rank
-        |    FROM countsByYearAndCountry) ranks
-        |where region_rank <= 10
-      """.stripMargin)
   }
 
-  case class MetricInfo(metric: Dataset[FullEvent] => DataFrame, description: String, id: String)
+  case class MetricInfo(metric: Dataset[FullEvent] => DataFrame, id: String)
 
   val metrics: Seq[MetricInfo] = Seq(
-    MetricInfo(getMedalsByYear, "Medals by year", "medals_by_year"),
-    MetricInfo(getTopCitiesByMedalCount, "Top 10 cities by number of medals", "top_10_cities"),
-    MetricInfo(getTopCountriesByGoldMedalCountPerYear, "Top 10 countries by number of gold medals per year", "top_10_countries_per_year")
+    MetricInfo(getMedalsByYear, "medals_by_year"),
+    MetricInfo(getTopCitiesByMedalCount, "top_10_cities"),
+    MetricInfo(getTopCountriesByGoldMedalCountPerYear, "top_10_countries_per_year")
+  )
+
+  val dfStorage: Array[DataFrame] = Array.fill(3){null}
+
+  val globalMetrics:Seq[DataFrame => DataFrame] = Seq(
+    (_:DataFrame).groupBy(col("year")).sum("count").withColumnRenamed("sum(count)", "count"),
+    (_:DataFrame).groupBy(col("city")).sum("count").withColumnRenamed("sum(count)", "count").limit(10),
+    (frame: DataFrame) => {
+      frame.createOrReplaceTempView("frame")
+      SparkSession.builder().getOrCreate().sql(
+        """
+          |SELECT *
+          |FROM (
+          |    SELECT year,
+          |           region,
+          |           count,
+          |           ROW_NUMBER() OVER (PARTITION BY year ORDER BY count DESC) as region_rank
+          |    FROM frame) ranks
+          |WHERE region_rank <= 10
+        """.stripMargin)
+    }
   )
 
   def process(input: DStream[String], windowLength: Int, slidingInterval: Int): Unit = {
     val configManager = ConfigManager.getInstance()
     val gcpStorageDumpPath = configManager.getGcpDumpPath
     val gcpBigQueryDataset = configManager.getBigQueryDataset
-    input.window(Seconds(windowLength), Seconds(slidingInterval)).foreachRDD{rdd =>
-      if (rdd.isEmpty()) {
-        println(s"Current RDD (#${rdd.id}) is empty.")
-      } else {
-        val rddSize = rdd.count()
-        println(s"The size of the current RDD (#${rdd.id}) is $rddSize.")
 
+    input.window(Seconds(windowLength), Seconds(slidingInterval)).foreachRDD{rdd =>
+      if (!rdd.isEmpty()) {
         val timestamp = new Timestamp(System.currentTimeMillis)
         val timestampString = new SimpleDateFormat("dd:MM:yyyy_HH:mm:ss").format(timestamp)
-        val directory = f"${rdd.id}%05d_$timestampString"
+        val directory = timestampString
 
         val dataset = CsvUtils.datasetFromCSV(rdd, FullEventEncoder)
-        for (MetricInfo(metric, description, name) <- metrics) {
+        for ((MetricInfo(metric, name), i) <- metrics.zipWithIndex) {
           val plainDataframe = metric(dataset)
           val stampedDataframe = plainDataframe
-            .withColumn("rdd", lit(rdd.id))
             .withColumn("timestamp", lit(timestamp))
 
           plainDataframe.write
@@ -84,8 +86,25 @@ object Metrics {
             .mode("append")
             .save()
 
-          println(s"${description}:")
-          println(stampedDataframe.show(10))
+          if (dfStorage(i) == null) {
+            dfStorage(i) = SparkSession.builder().getOrCreate().createDataFrame(plainDataframe.rdd, plainDataframe.schema).persist(StorageLevel.MEMORY_AND_DISK_SER_2)
+          } else {
+            val original = dfStorage(i)
+            val union = original.union(plainDataframe)
+            val persisted = SparkSession.builder().getOrCreate().createDataFrame(union.rdd, union.schema).persist(StorageLevel.MEMORY_AND_DISK_SER_2)
+            original.unpersist()
+
+            val df = globalMetrics(i)(persisted)
+            val stampedGlobalDataframe = df
+              .withColumn("timestamp", lit(timestamp))
+            stampedGlobalDataframe.write
+              .format("com.google.cloud.spark.bigquery")
+              .option("table", s"$gcpBigQueryDataset.${name}_global")
+              .mode("overwrite")
+              .save()
+
+            dfStorage(i) = persisted
+          }
         }
       }
     }
