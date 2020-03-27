@@ -61,6 +61,11 @@ object Metrics {
     }
   )
 
+  def forcePersist(frame: DataFrame): DataFrame =
+    SparkSession.builder().getOrCreate()
+      .createDataFrame(frame.rdd, frame.schema)
+      .persist(StorageLevel.MEMORY_AND_DISK_SER_2)
+
   def process(input: DStream[String], windowLength: Int, slidingInterval: Int): Unit = {
     val configManager = ConfigManager.getInstance()
     val gcpStorageDumpPath = configManager.getGcpDumpPath
@@ -87,11 +92,10 @@ object Metrics {
             .save()
 
           if (dfStorage(i) == null) {
-            dfStorage(i) = SparkSession.builder().getOrCreate().createDataFrame(plainDataframe.rdd, plainDataframe.schema).persist(StorageLevel.MEMORY_AND_DISK_SER_2)
+            dfStorage(i) = forcePersist(plainDataframe)
           } else {
             val original = dfStorage(i)
-            val union = original.union(plainDataframe)
-            val persisted = SparkSession.builder().getOrCreate().createDataFrame(union.rdd, union.schema).persist(StorageLevel.MEMORY_AND_DISK_SER_2)
+            val persisted = forcePersist(original.union(plainDataframe))
             original.unpersist()
 
             val df = globalMetrics(i)(persisted)
