@@ -61,7 +61,7 @@ object Metrics {
     }
   )
 
-  val forcePersist: DataFrame => DataFrame = frame =>
+  def forcePersist(frame: DataFrame): DataFrame =
     SparkSession.builder().getOrCreate()
       .createDataFrame(frame.rdd, frame.schema)
       .persist(StorageLevel.MEMORY_AND_DISK_SER_2)
