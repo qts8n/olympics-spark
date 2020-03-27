@@ -55,7 +55,7 @@ class RDDTest extends WordSpec with MustMatchers with BeforeAndAfter {
 
           val dataset = CsvUtils.datasetFromCSV(rdd, FullEventEncoder)
 
-          val metric = getTopCountriesByGoldMedalCountPerYear
+          val metric = metrics(0).localFn
           val dataframe = metric(dataset).withColumn("timestamp", lit(timestamp))
 
           println(directory)
