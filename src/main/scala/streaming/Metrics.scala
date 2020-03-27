@@ -18,35 +18,6 @@ import org.apache.spark.storage.StorageLevel
  * DStream and RDD pipelines.
  */
 object Metrics {
-//  val getMedalsByYear: Dataset[FullEvent] => DataFrame =
-//    _.filter(_.year != null).filter(_.medal != null)
-//     .groupBy(col("year")).count()
-//
-//  val getTopCitiesByMedalCount: Dataset[FullEvent] => DataFrame =
-//    _.filter(_.city != null).filter(_.medal != null)
-//     .groupBy(col("city")).count().sort(-col("count"))
-//     .limit(10)
-//
-//  val getTopCountriesByGoldMedalCountPerYear: Dataset[FullEvent] => DataFrame = { dataset =>
-//    val countsByYearAndCountry = dataset
-//      .filter(_.year != null).filter(_.region != null).filter(_.medal != null).filter(_.medal.toLowerCase.equals("gold"))
-//      .groupBy(col("year"), col("region")).count()
-//    countsByYearAndCountry.createOrReplaceTempView("countsByYearAndCountry")
-//    SparkSession.builder().getOrCreate().sql(
-//      """
-//        |SELECT ranks.year AS year,
-//        |       ranks.region AS region,
-//        |       ranks.count as count
-//        |FROM (
-//        |    SELECT year,
-//        |           region,
-//        |           count,
-//        |           row_number() over (partition by year order by count desc) as region_rank
-//        |    FROM countsByYearAndCountry) ranks
-//        |WHERE region_rank <= 10
-//      """.stripMargin)
-//  }
-
   val getMedalsByYear: Dataset[FullEvent] => DataFrame =
     _.filter(_.year != null).filter(_.medal != null)
       .groupBy(col("year")).count()
