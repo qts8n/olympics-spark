@@ -116,12 +116,14 @@ object Metrics {
             .save()
 
           if (dfStorage(i) == null) {
-            dfStorage(i) = plainDataframe.persist(StorageLevel.MEMORY_AND_DISK_SER_2)
+            dfStorage(i) = SparkSession.builder().getOrCreate().createDataFrame(plainDataframe.rdd, plainDataframe.schema).persist(StorageLevel.MEMORY_AND_DISK_SER_2)
           } else {
             val original = dfStorage(i)
-            val union = original.union(plainDataframe).persist(StorageLevel.MEMORY_AND_DISK_SER_2)
+            val union = original.union(plainDataframe)
+            val persisted = SparkSession.builder().getOrCreate().createDataFrame(union.rdd, union.schema).persist(StorageLevel.MEMORY_AND_DISK_SER_2)
+            original.unpersist()
 
-            val df = globalMetrics(i)(union)
+            val df = globalMetrics(i)(persisted)
             val stampedGlobalDataframe = df
               .withColumn("timestamp", lit(timestamp))
             stampedGlobalDataframe.write
@@ -130,8 +132,7 @@ object Metrics {
               .mode("overwrite")
               .save()
 
-            dfStorage(i) = union
-            // original.unpersist() // с до стадии 107, без до стадии 154
+            dfStorage(i) = persisted
           }
         }
       }
