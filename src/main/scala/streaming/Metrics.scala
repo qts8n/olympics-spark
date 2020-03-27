@@ -73,7 +73,7 @@ object Metrics {
 
   val globalMetrics:Seq[DataFrame => DataFrame] = Seq(
     (_:DataFrame).groupBy(col("year")).sum("count").withColumnRenamed("sum(count)", "count"),
-    (_:DataFrame).groupBy(col("city")).sum("count").withColumnRenamed("sum(count)", "count"),
+    (_:DataFrame).groupBy(col("city")).sum("count").withColumnRenamed("sum(count)", "count").limit(10),
     (frame: DataFrame) => {
       frame.createOrReplaceTempView("frame")
       SparkSession.builder().getOrCreate().sql(
