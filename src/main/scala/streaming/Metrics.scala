@@ -18,30 +18,29 @@ import org.apache.spark.storage.StorageLevel
  * DStream and RDD pipelines.
  */
 object Metrics {
-  case class Metric(localFn: Dataset[FullEvent] => DataFrame, globalFn: DataFrame => DataFrame,
+  case class Metric(localFn: Dataset[Event] => DataFrame, globalFn: DataFrame => DataFrame,
                     id: String, var storage: DataFrame)
 
   val metrics: Array[Metric] = Array(
     Metric(
-      (_: Dataset[FullEvent]).filter(_.year != null).filter(_.medal != null)
-                             .groupBy(col("year")).count(),
+      (_: Dataset[Event]).filter(_.year != null).filter(_.medal != null)
+        .groupBy(col("year")).count(),
       (_: DataFrame).groupBy(col("year")).sum("count")
-                    .withColumnRenamed("sum(count)", "count"),
+        .withColumnRenamed("sum(count)", "count"),
       "medals_by_year",
       null
     ),
     Metric(
-      (_: Dataset[FullEvent]).filter(_.city != null).filter(_.medal != null)
-                             .groupBy(col("city")).count().sort(-col("count")),
+      (_: Dataset[Event]).filter(_.city != null).filter(_.medal != null)
+        .groupBy(col("city")).count().sort(-col("count")),
       (_: DataFrame).groupBy(col("city")).sum("count")
-                    .withColumnRenamed("sum(count)", "count").limit(10),
+        .withColumnRenamed("sum(count)", "count").limit(10),
       "top_10_cities",
       null
     ),
     Metric(
-      (_: Dataset[FullEvent]).filter(_.year != null).filter(_.region != null).filter(_.medal != null)
-                             .filter(_.medal.toLowerCase.equals("gold"))
-                             .groupBy(col("year"), col("region")).count(),
+      (_: Dataset[Event]).filter(_.year != null).filter(_.region != null).filter(_.medal != null)
+        .filter(_.medal.toLowerCase.equals("gold")).groupBy(col("year"), col("region")).count(),
       (frame: DataFrame) => {
         frame.createOrReplaceTempView("frame")
         SparkSession.builder().getOrCreate().sql(
@@ -77,7 +76,7 @@ object Metrics {
         val timestampString = new SimpleDateFormat("dd:MM:yyyy_HH:mm:ss").format(timestamp)
         val directory = timestampString
 
-        val dataset = CsvUtils.datasetFromCSV(rdd, FullEventEncoder)
+        val dataset = CsvUtils.datasetFromCSV(rdd, EventEncoder)
         for (i <- metrics.indices) {
           val metric = metrics(i)
 

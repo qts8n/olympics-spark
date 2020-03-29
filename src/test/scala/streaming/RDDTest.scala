@@ -53,7 +53,7 @@ class RDDTest extends WordSpec with MustMatchers with BeforeAndAfter {
           val timestampString = new SimpleDateFormat("dd:MM:yyyy_HH:mm:ss").format(timestamp)
           val directory = f"${rdd.id}%05d_$timestampString"
 
-          val dataset = CsvUtils.datasetFromCSV(rdd, FullEventEncoder)
+          val dataset = CsvUtils.datasetFromCSV(rdd, EventEncoder)
 
           val metric = metrics(0).localFn
           val dataframe = metric(dataset).withColumn("timestamp", lit(timestamp))
